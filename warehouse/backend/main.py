@@ -13,7 +13,7 @@ app.add_middleware(
 
 @app.post("/login")
 def login(username:str, password:str):
-    token = functions.verify_login(username=username, password=password, token_type=refresh)
+    token = functions.verify_login(username=username, password=password)
     if token is None:
         raise HTTPException(status_code=401, detail="Invalid")
     return token
@@ -34,7 +34,7 @@ def hello():
 
 
 @app.post("/packages")
-def register_packages(package_name,destination,weight,arrival_date,status, token = Header(None)):
+def register_packages(package_name,destination,weight,arrival_date,status, token = Header(None), token_type="refresh"):
     username = functions.verify_token(token=token, token_type=token_type)
     if not username:
         raise HTTPException(status_code = 401, detail = "Invalid or expairy token")
@@ -44,14 +44,13 @@ def register_packages(package_name,destination,weight,arrival_date,status, token
 
 
 @app.get("/packages")
-def search_packages(destination=None, status=None, arrival_date=None, token = Header(None)):
-    username = functions.verify_token(token=token)
-    if not username:
-        raise HTTPException(status_code = 401, detail = "Invalid or expairy token")
-    response = functions.get_package(package_id)
-    if response is None:
-        raise HTTPException(status_code=404, detail="Package not found")
-    return response
+def search_packages(destination: str = None, status: str = None, arrival_date: str = None, token=Header(None)):
+    if status and status not in functions.STATUSES:
+        raise HTTPException(status_code=422, detail="Invalid status")
+    date_value = None
+    if arrival_date:
+        date_value = parse_date(arrival_date)
+    return functions.get_all_packages(destination or None, status or None, date_value)
 
 
 @app.get("/packages/{package_id}")
