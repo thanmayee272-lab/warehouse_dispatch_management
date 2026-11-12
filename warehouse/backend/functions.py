@@ -136,7 +136,8 @@ def get_all_dispatch_batches(destination=None, vehicle=None, dispatch_status=Non
             "destination": batch.destination,
             "vehicle": batch.vehicle,
             "dispatch_status": batch.dispatch_status,
-            "dispatch_date": str(batch.dispatch_date) if batch.dispatch_date else None,
+            "dispatch_date": str(batch.dispatch_date)
+            if batch.dispatch_date else None,
             "package_ids": [p.id for p in packages]
         })
     session.close()
@@ -214,27 +215,18 @@ def create_dispatch_batch(destination, vehicle, package_ids, dispatch_status):
 # Update Dispatch Status
 def update_dispatch_status(batch_id, dispatch_status):
     session = Session(engine)
-
     batch = session.get(DispatchBatches, batch_id)
-
     if batch is None:
         session.close()
         return "not_found"
-
     batch.dispatch_status = dispatch_status
-
     if dispatch_status == "dispatched":
         batch.dispatch_date = date.today()
-
-    packages = session.query(Packages).filter(
-        Packages.dispatch_batch_id == batch_id
-    ).all()
-
+    packages = session.query(Packages).filter(Packages.dispatch_batch_id == batch_id).all()
     for package in packages:
         package.status = dispatch_status
 
     session.commit()
-
     response = {
         "id": batch.id,
         "destination": batch.destination,
@@ -242,6 +234,5 @@ def update_dispatch_status(batch_id, dispatch_status):
         "dispatch_status": batch.dispatch_status,
         "dispatch_date": str(batch.dispatch_date)
     }
-
     session.close()
     return response
