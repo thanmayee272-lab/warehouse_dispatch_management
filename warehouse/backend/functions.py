@@ -300,7 +300,9 @@ def update_dispatch_status(batch_id, dispatch_status):
     packages = session.query(Packages).filter(Packages.dispatch_batch_id == batch_id).all()
     for package in packages:
         package.status = dispatch_status
+
     session.commit()
+
     response = {
         "id": batch.id,
         "destination": batch.destination,

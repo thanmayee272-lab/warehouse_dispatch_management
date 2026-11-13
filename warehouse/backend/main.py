@@ -13,6 +13,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+
 class User(BaseModel):
     username: str
     password: str
@@ -68,13 +70,14 @@ def refresh(refresh_token = Header(None)):
     username = functions.verify_token(token=refresh_token, token_type = "refresh")
     if not username:
         raise HTTPException(status_code = 401, detail = "Invalid or refresh token")
-    access_token = functions.create_token(username=username, token_type = "access")
+    access_token = functions.create_token(username=user["username"], role=user["role"], token_type = "access")
     return {"access_token": access_token}
 
 
 # E1
 @app.post("/packages")
 def register_package(package:Package, token = Header(None)):
+    
     username = functions.verify_token(token=token, token_type = "access")
     if not username:
         raise HTTPException(status_code = 401, detail = "Invalid or expiry token")
