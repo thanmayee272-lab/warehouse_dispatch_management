@@ -2,7 +2,11 @@ from sqlalchemy import Integer, String, Column, Float, Date, ForeignKey, create_
 from sqlalchemy.orm import Session, declarative_base
 from datetime import datetime, timedelta, timezone, date
 import jwt 
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
 
+
+ph = PasswordHasher()
 
 DB_PATH = "warehouse.db"
 engine = create_engine(f"sqlite:///{DB_PATH}")
@@ -36,6 +40,14 @@ class DispatchBatches(Base):
     dispatch_status = Column(String, default="pending")
     dispatch_date = Column(Date, nullable=True)
 
+
+class User(Base):
+    __tablename__ = "user"
+    id = Column[int](Integer, primary_key=True)
+    username = Column[str](String)
+    password = Column[str](String)
+
+
 Base.metadata.create_all(engine)
 
 
@@ -50,13 +62,35 @@ def package_details(package):
         "dispatch_batch_id": package.dispatch_batch_id
     }
 
+# -----------user------------
+def register_user(user_name:str, password:str):
+    session = Session(engine)
+    user_exists = session.query(User).filter_by(username=user_name).first()
+    if user_exists:
+        session.close()
+        return False
+    session.add(User(username=user_name, password=ph.hash(password)))
+    session.commit()
+    session.close()
+    return True
+
 
 def verify_login(username, password):
-    if username == USERNAME and password == PASSWORD:
-        access_token = create_token(username=username, token_type ="access")
-        refresh_token = create_token(username=username, token_type ="refresh")
-        return {"access_token": access_token, "refresh_token": refresh_token}
-    return None
+    session = Session(engine)
+    user = session.query(User).filter_by(username=username).first()
+    if user is None:
+        session.close()
+        return False
+    try:
+        ph.verify(user.password, password)
+    except VerifyMismatchError:
+        session.close()
+        return False
+
+    session.close()
+    access_token = create_token(username=username, token_type="access")
+    refresh_token = create_token(username=username, token_type="refresh")
+    return {"access_token": access_token, "refresh_token": refresh_token}
 
 
 def create_token(username, token_type):
@@ -130,7 +164,7 @@ def update_package(package_id, data):
     if "weight" in data:
         package.weight = data["weight"]
     if "arrival_date" in data:
-        package.arrival_date = date.fromisoformat(data["arrival_date"])
+        package.arrival_date = data["arrival_date"]
     session.commit()
     response = package_details(package)
     session.close()
@@ -152,17 +186,10 @@ def delete_package(package_id):
     return "deleted"
 
 # E5
-def get_all_packages(destination=None, status=None, arrival_date=None):
+def get_all_packages():
     session = Session(engine)
-    packages = session.query(Packages)
-    if destination:
-        packages = packages.filter(Packages.destination == destination)
-    if status:
-        packages = packages.filter(Packages.status == status)
-    if arrival_date:
-        arrival_date = date.fromisoformat(arrival_date)
-        packages = packages.filter(Packages.arrival_date == arrival_date)
-    response = [package_details(p) for p in packages.all()]
+    packages = session.query(Packages).all()
+    response = [package_details(p) for p in packages]
     session.close()
     return response
 
@@ -260,30 +287,20 @@ def create_dispatch_batch(destination, vehicle, package_ids, dispatch_status):
     session.close()
     return response
 
-# Update Dispatch Status
+
 def update_dispatch_status(batch_id, dispatch_status):
     session = Session(engine)
-
     batch = session.get(DispatchBatches, batch_id)
-
     if batch is None:
         session.close()
         return "not_found"
-
     batch.dispatch_status = dispatch_status
-
     if dispatch_status == "dispatched":
         batch.dispatch_date = date.today()
-
-    packages = session.query(Packages).filter(
-        Packages.dispatch_batch_id == batch_id
-    ).all()
-
+    packages = session.query(Packages).filter(Packages.dispatch_batch_id == batch_id).all()
     for package in packages:
         package.status = dispatch_status
-
     session.commit()
-
     response = {
         "id": batch.id,
         "destination": batch.destination,
