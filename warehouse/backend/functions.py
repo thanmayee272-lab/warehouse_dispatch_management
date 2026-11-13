@@ -1,22 +1,22 @@
 from sqlalchemy import Integer, String, Column, Float, Date, ForeignKey, create_engine
 from sqlalchemy.orm import Session, declarative_base
-from datetime import date, datetime, timedelta, timezone
-import jwt
+from datetime import datetime, timedelta, timezone, date
+import jwt 
+
 
 DB_PATH = "warehouse.db"
 engine = create_engine(f"sqlite:///{DB_PATH}")
 Base = declarative_base()
 
+
 USERNAME = "milky"
 PASSWORD = "2357"
-ACCESS_TOCKEN_EXPIRY = 15
-REFRESH_TOKEN_EXPIRY = 7*24*60
+
+ACCESS_TOKEN_EXPIRY = 15
+REFRESH_TOKEN_EXPIRY = 7 * 24 * 60
 SECRET_KEY = "secret1234"
 ALGORITHM = "HS256"
 
-
-STATUSES = ["pending", "assigned", "dispatched"]
-BATCH_STATUSES = ["planned", "dispatched"]
 
 class Packages(Base):
     __tablename__ = "packages"
@@ -26,7 +26,7 @@ class Packages(Base):
     weight = Column(Float)
     arrival_date = Column(Date)
     status = Column(String, default="pending")
-    dispatch_batch_id = Column(Integer, ForeignKey("dispatch_batches.id"))
+    dispatch_batch_id = Column(Integer, ForeignKey("dispatch_batches.id"), nullable=True)
 
 class DispatchBatches(Base):
     __tablename__ = "dispatch_batches"
@@ -34,44 +34,9 @@ class DispatchBatches(Base):
     destination = Column(String)
     vehicle = Column(String)
     dispatch_status = Column(String, default="pending")
-    dispatch_date = Column(Date)
+    dispatch_date = Column(Date, nullable=True)
 
 Base.metadata.create_all(engine)
-
-
-def verify_login(username, password):
-    if username == USERNAME and password == PASSWORD:
-        access_token = create_token(username=username, token_type="access")
-        refresh_token = create_token(username=username, token_type="refresh")
-        return {"access_token":access_token, "refresh_token":refresh_token}
-    return None
-
-
-def create_token(username, token_type):
-    time = ACCESS_TOCKEN_EXPIRY
-    if token_type == "refresh":
-        time = REFRESH_TOKEN_EXPIRY
-
-    payload = {
-        "username": username,
-        "token_type":token_type,
-        "exp":datetime.now(timezone.utc) + timedelta(minutes=time)
-    }
-    token = jwt.encode(payload=payload, key=SECRET_KEY, algorithm=ALGORITHM)
-    return token
-
-
-def verify_token(token, token_type):
-    if token is None:
-        return False
-    try:
-        payload = jwt.decode(jwt=token, key=SECRET_KEY, algorithms=[ALGORITHM])
-        return payload["username"]
-    except:
-        return False
-    if payload["token_type"] == token_type:
-        return payoad["username"]
-    return False
 
 
 def package_details(package):
@@ -86,32 +51,53 @@ def package_details(package):
     }
 
 
-def batch_details(session, batch):
-    packages = session.query(Packages).filter(Packages.dispatch_batch_id == batch.id).all()
-    return {
-        "id": batch.id,
-        "destination": batch.destination,
-        "vehicle": batch.vehicle,
-        "dispatch_status": batch.dispatch_status,
-        "dispatch_date": str(batch.dispatch_date) if batch.dispatch_date else None,
-        "package_ids": [package.id for package in packages]
-    }
+def verify_login(username, password):
+    if username == USERNAME and password == PASSWORD:
+        access_token = create_token(username=username, token_type ="access")
+        refresh_token = create_token(username=username, token_type ="refresh")
+        return {"access_token": access_token, "refresh_token": refresh_token}
+    return None
+
+
+def create_token(username, token_type):
+    time = ACCESS_TOKEN_EXPIRY
+    if token_type == "refresh":
+      time = REFRESH_TOKEN_EXPIRY
+    payload = {
+        "username": username,
+        "token_type": token_type,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=time),
+        }
+    token = jwt.encode(payload=payload, key=SECRET_KEY, algorithm=ALGORITHM)
+    return token 
+
+
+def verify_token(token, token_type):
+    try:
+     payload = jwt.decode(jwt=token, key=SECRET_KEY, algorithms=[ALGORITHM])
+    except:
+        return False
+    if payload["token_type"] == token_type:
+        return payload["username"]
+    return False
 
 
 # E1
-def add_package(package_name, destination, weight, arrival_date, status):
+def add_package(package_name, destination, weight, arrival_date):
     session = Session(engine)
     package = Packages(
         package_name=package_name,
         destination=destination,
         weight=weight,
-        arrival_date=arrival_date,
-        status=status
+        arrival_date=date.fromisoformat(arrival_date),
+        status="pending"
     )
     session.add(package)
     session.commit()
+    session.refresh(package)
+    response = package_details(package)
     session.close()
-    return "registered"
+    return response
 
 # E2
 def get_package(package_id):
@@ -119,31 +105,36 @@ def get_package(package_id):
     package = session.get(Packages, package_id)
     if package is None:
         session.close()
-        return "not_found"
-    return package
-
+        return None
+    response = package_details(package)
+    session.close()
+    return response
 
 # E3
-def update_package(package_id, name=None, destination=None, weight=None, arrival_date=None, status=None):
+def update_package(package_id, data):
     session = Session(engine)
     package = session.get(Packages, package_id)
     if package is None:
         session.close()
         return "not_found"
-    if name is not None:
-        package.name = name
-    if destination is not None:
-        package.destination = destination
-    if weight is not None:
-        package.weight = weight
-    if arrival_date is not None:
-        package.arrival_date = arrival_date
-    if status is not None:
-        package.status = status
+    if package.status == "dispatched":
+        session.close()
+        return "already_dispatched"
+    if package.dispatch_batch_id is not None:
+        session.close()
+        return "already_assigned"
+    if "package_name" in data:
+        package.package_name = data["package_name"]
+    if "destination" in data:
+        package.destination = data["destination"]
+    if "weight" in data:
+        package.weight = data["weight"]
+    if "arrival_date" in data:
+        package.arrival_date = date.fromisoformat(data["arrival_date"])
     session.commit()
+    response = package_details(package)
     session.close()
-    return "updated"
-
+    return response
 
 # E4
 def delete_package(package_id):
@@ -164,50 +155,64 @@ def delete_package(package_id):
 def get_all_packages(destination=None, status=None, arrival_date=None):
     session = Session(engine)
     packages = session.query(Packages)
-    if destination is not None:
+    if destination:
         packages = packages.filter(Packages.destination == destination)
-    if status is not None:
+    if status:
         packages = packages.filter(Packages.status == status)
-    if arrival_date is not None:
+    if arrival_date:
+        arrival_date = date.fromisoformat(arrival_date)
         packages = packages.filter(Packages.arrival_date == arrival_date)
-    result = packages.order_by(Packages.id).all()
+    response = [package_details(p) for p in packages.all()]
     session.close()
-    return result
-
+    return response
 
 # E6
-def get_all_batches(destination=None, vehicle=None, status=None):
+def get_all_dispatch_batches(destination=None, vehicle=None, dispatch_status=None):
     session = Session(engine)
     batches = session.query(DispatchBatches)
-    if destination is not None:
+    if destination:
         batches = batches.filter(DispatchBatches.destination == destination)
-    if vehicle is not None:
+    if vehicle:
         batches = batches.filter(DispatchBatches.vehicle == vehicle)
-    if status is not None:
-        batches = batches.filter(DispatchBatches.status == status)
-    result = []
-    for batch in batches.order_by(DispatchBatches.id).all():
-        result.append(batch_to_dict(session, batch))
+    if dispatch_status:
+        batches = batches.filter(DispatchBatches.dispatch_status == dispatch_status)
+    response = []
+    for batch in batches.all():
+        packages = session.query(Packages).filter(
+            Packages.dispatch_batch_id == batch.id).all()
+        response.append({
+            "id": batch.id,
+            "destination": batch.destination,
+            "vehicle": batch.vehicle,
+            "dispatch_status": batch.dispatch_status,
+            "dispatch_date": str(batch.dispatch_date) if batch.dispatch_date else None,
+            "package_ids": [p.id for p in packages]
+        })
     session.close()
-    return result
-
+    return response
 
 # E7
 def get_warehouse_statistics():
     session = Session(engine)
+    total = session.query(Packages).count()
+    dispatched = session.query(Packages).filter(
+        Packages.status == "dispatched"
+    ).count()
     packages = session.query(Packages).all()
-    pending = 0
-    dispatched = 0
-    destination_counts = {}
+    destinations = {}
     for package in packages:
-        if package.status == "dispatched":
-            dispatched += 1
-        else:
-            pending += 1
-        destination_counts[package.destination] = destination_counts.get(package.destination, 0) + 1
+        name = package.destination
+        if name not in destinations:
+            destinations[name] = 0
+        destinations[name] += 1
+    response = {
+        "total_packages": total,
+        "pending_packages": total - dispatched,
+        "dispatched_packages": dispatched,
+        "destination_wise_count": destinations
+    }
     session.close()
-    return {"total_received": len(packages), "total_pending": pending,
-            "total_dispatched": dispatched, "destination_counts": destination_counts}
+    return response
 
 # E8
 def create_dispatch_batch(destination, vehicle, package_ids, dispatch_status):
@@ -255,21 +260,37 @@ def create_dispatch_batch(destination, vehicle, package_ids, dispatch_status):
     session.close()
     return response
 
-
-def dispatch_batch(batch_id):
+# Update Dispatch Status
+def update_dispatch_status(batch_id, dispatch_status):
     session = Session(engine)
+
     batch = session.get(DispatchBatches, batch_id)
+
     if batch is None:
         session.close()
         return "not_found"
-    if batch.status == "dispatched":
-        session.close()
-        return "already_dispatched"
-    batch.status = "dispatched"
-    batch.dispatch_date = date.today()
-    packages = session.query(Packages).filter(Packages.batch_id == batch_id).all()
+
+    batch.dispatch_status = dispatch_status
+
+    if dispatch_status == "dispatched":
+        batch.dispatch_date = date.today()
+
+    packages = session.query(Packages).filter(
+        Packages.dispatch_batch_id == batch_id
+    ).all()
+
     for package in packages:
-        package.status = "dispatched"
+        package.status = dispatch_status
+
     session.commit()
+
+    response = {
+        "id": batch.id,
+        "destination": batch.destination,
+        "vehicle": batch.vehicle,
+        "dispatch_status": batch.dispatch_status,
+        "dispatch_date": str(batch.dispatch_date)
+    }
+
     session.close()
-    return "dispatched"
+    return response
