@@ -14,10 +14,10 @@ app.add_middleware(
 )
 
 
-
 class User(BaseModel):
     username: str
     password: str
+    user_type: str 
 
 
 class Package(BaseModel):
@@ -52,14 +52,14 @@ def hello():
 
 @app.post("/register")
 def register(user: User):
-    if functions.register_user(user_name=user.username, password=user.password):
+    if functions.register_user(user_name=user.username, password=user.password, user_type=user.user_type):
         return {"message": "User registered successfully"}
     raise HTTPException(status_code=400, detail="User already exists")        
 
 
 @app.post("/login")
-def login(user: User):
-    token = functions.verify_login(username=user.username, password=user.password)
+def login(username: str = Body(), password: str = Body()):
+    token = functions.verify_login(username=username, password=password)
     if not token:
         raise HTTPException(status_code=401, detail="Invalid")
     return token
@@ -67,29 +67,30 @@ def login(user: User):
 
 @app.post("/refresh")
 def refresh(refresh_token = Header(None)):
-    username = functions.verify_token(token=refresh_token, token_type = "refresh")
-    if not username:
+    payload = functions.verify_token(token=refresh_token, token_type = "refresh")
+    if not payload:
         raise HTTPException(status_code = 401, detail = "Invalid or refresh token")
-    access_token = functions.create_token(username=user["username"], role=user["role"], token_type = "access")
+    access_token = functions.create_token(username=payload["username"], user_type=payload["user_type"], token_type = "access")
     return {"access_token": access_token}
 
 
 # E1
 @app.post("/packages")
 def register_package(package:Package, token = Header(None)):
-    
     username = functions.verify_token(token=token, token_type = "access")
     if not username:
         raise HTTPException(status_code = 401, detail = "Invalid or expiry token")
     if package.weight <= 0:
         raise HTTPException(status_code=422, detail="Incorrect weight")
+    if payload["user_type"] != "manager":
+        raise HTTPException(status_code=403, detail="Only managers can register packages") 
     return functions.add_package(package.package_name, package.destination, package.weight, package.arrival_date)
 
 # E2 
 @app.get("/packages/{package_id}")
 def get_package(package_id: int, token = Header(None)):
-    username = functions.verify_token(token=token, token_type="access")
-    if not username:
+    payload = functions.verify_token(token=token, token_type="access")
+    if not payload:
         raise HTTPException(status_code = 401, detail = "Invalid or expiry token")
     response = functions.get_package(package_id)
     if response is None:
@@ -100,8 +101,8 @@ def get_package(package_id: int, token = Header(None)):
 # E3 
 @app.patch("/packages/{package_id}")
 def update_package(package_id: int, package: PackageUpdate, token = Header(None)):
-    username = functions.verify_token(token=token, token_type = "access")
-    if not username:
+    payload = functions.verify_token(token=token, token_type = "access")
+    if not payload:
         raise HTTPException(status_code = 401, detail = "Invalid or expiry token")
     if package.weight is not None and package.weight <= 0:
         raise HTTPException(status_code=422, detail="Incorrect weight")
@@ -128,29 +129,31 @@ def update_package(package_id: int, package: PackageUpdate, token = Header(None)
 # E4 
 @app.delete("/packages/{package_id}")
 def delete_package(package_id: int, token = Header(None)):
-    username = functions.verify_token(token=token, token_type = "access")
-    if not username:
+    payload = functions.verify_token(token=token, token_type = "access")
+    if not payload:
         raise HTTPException(status_code = 401, detail = "Invalid or expiry token")
     response = functions.delete_package(package_id)
     if response == "not_found":
         raise HTTPException(status_code=404, detail="Package not found")
     if response == "already_dispatched":
         raise HTTPException(status_code=400, detail="Dispatched package cannot be deleted")
+    if payload["user_type"] != "manager":
+        raise HTTPException(status_code=403, detail="Only managers can delete packages")
     return {"message": "Package deleted successfully"}
 
 # E5 
 @app.get("/packages")
 def get_packages(package_id: int = None, token = Header(None)):
-    username = functions.verify_token(token=token, token_type = "access")
-    if not username:
+    payload = functions.verify_token(token=token, token_type = "access")
+    if not payload:
         raise HTTPException(status_code = 401, detail = "Invalid or expiry token")
     return functions.get_all_packages()
 
 # E6
 @app.get("/dispatch-batches")
 def get_dispatch_batches(dispatch_status: str = None,token=Header(None)):
-    username = functions.verify_token(token=token,token_type="access")
-    if not username:
+    payload = functions.verify_token(token=token,token_type="access")
+    if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     if dispatch_status is not None and dispatch_status not in ["pending", "dispatched"]:
         raise HTTPException(status_code=422, detail="Invalid dispatch status")
@@ -160,16 +163,18 @@ def get_dispatch_batches(dispatch_status: str = None,token=Header(None)):
 # E7 
 @app.get("/warehouse/statistics")
 def warehouse_statistics(token = Header(None)):
-    username = functions.verify_token(token=token, token_type = "access")
-    if not username:
+    payload = functions.verify_token(token=token, token_type = "access")
+    if not payload:
         raise HTTPException(status_code = 401, detail = "Invalid or expiry token")
+    if payload["user_type"] != "manager":
+        raise HTTPException(status_code=403, detail="Only managers can access warehouse statistics")
     return functions.get_warehouse_statistics()
 
 # E8
 @app.post("/dispatch-batches")
 def create_dispatch_batch(dispatch_batch: DispatchBatches,token=Header(None)):
-    username = functions.verify_token(token=token,token_type="access")
-    if not username:
+    payload = functions.verify_token(token=token,token_type="access")
+    if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     if dispatch_batch.dispatch_status not in ["pending", "dispatched"]:
         raise HTTPException(status_code=422, detail="Invalid dispatch status")
@@ -197,8 +202,8 @@ def create_dispatch_batch(dispatch_batch: DispatchBatches,token=Header(None)):
 # E9
 @app.patch("/dispatch-batches/{batch_id}")
 def update_dispatch_status(batch_id: int,dispatch_batch: DispatchBatchUpdate,token=Header(None)):
-    username = functions.verify_token(token=token,token_type="access")
-    if not username:
+    payload = functions.verify_token(token=token,token_type="access")
+    if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     if dispatch_batch.dispatch_status not in ["pending", "dispatched"]:
         raise HTTPException(status_code=422, detail="Invalid dispatch status")

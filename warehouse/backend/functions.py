@@ -43,9 +43,10 @@ class DispatchBatches(Base):
 
 class User(Base):
     __tablename__ = "user"
-    id = Column[int](Integer, primary_key=True)
+    user_id = Column[int](Integer, primary_key=True)
     username = Column[str](String)
     password = Column[str](String)
+    user_type = Column[str](String)
 
 
 Base.metadata.create_all(engine)
@@ -63,13 +64,15 @@ def package_details(package):
     }
 
 # -----------user------------
-def register_user(user_name:str, password:str):
+def register_user(user_name:str, password:str, user_type:str):
+    if user_type not in ["manager", "dispatcher"]:
+        raise HTTPException(status_code=422, detail="Invalid user type")
     session = Session(engine)
     user_exists = session.query(User).filter_by(username=user_name).first()
     if user_exists:
         session.close()
         return False
-    session.add(User(username=user_name, password=ph.hash(password)))
+    session.add(User(username=user_name, password=ph.hash(password), user_type=user_type))
     session.commit()
     session.close()
     return True
@@ -87,19 +90,20 @@ def verify_login(username, password):
         session.close()
         return False
 
+    access_token = create_token(username=username,user_type=user.user_type, token_type="access")
+    refresh_token = create_token(username=username,user_type=user.user_type, token_type="refresh")
     session.close()
-    access_token = create_token(username=username, token_type="access")
-    refresh_token = create_token(username=username, token_type="refresh")
     return {"access_token": access_token, "refresh_token": refresh_token}
 
 
-def create_token(username, token_type):
+def create_token(username,user_type, token_type):
     time = ACCESS_TOKEN_EXPIRY
     if token_type == "refresh":
       time = REFRESH_TOKEN_EXPIRY
     payload = {
         "username": username,
         "token_type": token_type,
+        "user_type": user_type,
         "exp": datetime.now(timezone.utc) + timedelta(minutes=time),
         }
     token = jwt.encode(payload=payload, key=SECRET_KEY, algorithm=ALGORITHM)
@@ -112,7 +116,7 @@ def verify_token(token, token_type):
     except:
         return False
     if payload["token_type"] == token_type:
-        return payload["username"]
+        return payload
     return False
 
 
