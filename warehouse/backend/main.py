@@ -77,8 +77,8 @@ def refresh(refresh_token = Header(None)):
 # E1
 @app.post("/packages")
 def register_package(package:Package, token = Header(None)):
-    username = functions.verify_token(token=token, token_type = "access")
-    if not username:
+    payload = functions.verify_token(token=token, token_type = "access")
+    if not payload:
         raise HTTPException(status_code = 401, detail = "Invalid or expiry token")
     if package.weight <= 0:
         raise HTTPException(status_code=422, detail="Incorrect weight")
