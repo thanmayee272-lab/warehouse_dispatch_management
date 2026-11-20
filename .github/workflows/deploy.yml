@@ -1,0 +1,49 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-push-deploy:
+    runs-on: ubuntu-latest
+    env:
+      # Docker Hub image name in the form <dockerhub-username>/<repo-name>, e.g. malnadhudga/warehouse.
+      # The username comes from the DOCKERHUB_USERNAME secret; change "warehouse" to your own repo name.
+      IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/warehouse
+      VERSION: v${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ env.VERSION }}
+
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            sudo systemctl enable --now docker
+            sudo usermod -aG docker $USER
+            sudo docker pull ${{ env.IMAGE }}:${{ env.VERSION }}
+            sudo docker rm -f warehouse || true
+            sudo docker run -d --name warehouse --restart unless-stopped -p 8000:8000 ${{ env.IMAGE }}:${{ env.VERSION }}
+            sudo docker image prune -af
+            sudo docker ps --filter name=warehouse
